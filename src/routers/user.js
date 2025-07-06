@@ -2,6 +2,7 @@ const express = require("express");
 const { userAuth } = require("../middleware/auth");
 const ConnectionRequest = require("../models/connectionRequest");
 const User = require("../models/user");
+const validator = require("validator");
 
 const userRouter = express.Router();
 
@@ -59,11 +60,24 @@ userRouter.get("/user/connections", userAuth, async (req, res) => {
 
 userRouter.get("/user/feed", userAuth, async (req, res) => {
   try {
+    const isPageNumeric = validator.isNumeric(req.query.page);
+    const isLimitNumeric = validator.isNumeric(req.query.limit);
+    if (!isPageNumeric || !isLimitNumeric) {
+      return res.status(400).json({
+        ERROR: "Page and limit must be numeric values",
+      });
+    }
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+
+    let skip = (page - 1) * limit;
+    skip = skip > 50 ? 50 : skip;
+
     const loggedInUser = req.user;
 
     const connectionRequestsSentOrRecieved = await ConnectionRequest.find({
       $or: [{ fromUserId: loggedInUser._id }, { toUserId: loggedInUser._id }],
-    });
+    }).select("fromUserId toUserId");
 
     const hideUsersFromFeed = new Set();
 
@@ -77,7 +91,10 @@ userRouter.get("/user/feed", userAuth, async (req, res) => {
         { _id: { $nin: Array.from(hideUsersFromFeed) } },
         { _id: { $ne: loggedInUser._id } },
       ],
-    }).select(USER_SAFE_DATA);
+    })
+      .select(USER_SAFE_DATA)
+      .skip(skip)
+      .limit(limit);
 
     res.status(200).json({
       message: "Feed fetched successfully",
